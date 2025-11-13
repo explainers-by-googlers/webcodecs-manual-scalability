@@ -1,12 +1,12 @@
 <pre class='metadata'>
-Title: The TODO API
-Shortname: todo
+Title: WebCodecs VideoEncoder Manual Scalability Mode API
+Shortname: webcodecs-manual-scalability
 Level: None
 Status: w3c/UD
-Repository: explainers-by-googlers/todo-your-repo-name
-URL: https://explainers-by-googlers.github.io/todo-your-repo-name
-Editor: TODO: Your Name, Google https://google.com, TODO@google.com
-Abstract: TODO: A short description of your spec, one or two sentences.
+Repository: explainers-by-googlers/webcodecs-manual-scalability
+URL: https://explainers-by-googlers.github.io/webcodecs-manual-scalability
+Editor: Erik Språng, Google https://google.com, sprang@google.com
+Abstract: This API introduces a new scalability mode that allows per-frame specification of references, instead of a fixed scalability mode pattern.
 Markup Shorthands: markdown yes, css no
 Complain About: accidental-2119 yes, missing-example-ids yes
 Assume Explicit For: yes

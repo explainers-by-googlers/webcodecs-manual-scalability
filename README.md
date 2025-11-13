@@ -1,185 +1,151 @@
-# Explainer for the TODO API
+# Explainer for the WebCodecs VideoEncoder Manual Scalability Mode API
 
-**Instructions for the explainer author: Search for "todo" in this repository and update all the
-instances as appropriate. For the instances in `index.bs`, update the repository name, but you can
-leave the rest until you start the specification. Then delete the TODOs and this block of text.**
-
-This proposal is an early design sketch by [TODO: team] to describe the problem below and solicit
+This proposal is an early design sketch by Chrome Media to describe the problem below and solicit
 feedback on the proposed solution. It has not been approved to ship in Chrome.
-
-TODO: Fill in the whole explainer template below using https://tag.w3.org/explainers/ as a
-reference. Look for [brackets].
 
 ## Proponents
 
-- [Proponent team 1]
-- [Proponent team 2]
-- [etc.]
+- Chrome Media
+- Chrome WebRTC
 
 ## Participate
-- https://github.com/explainers-by-googlers/[your-repository-name]/issues
-- [Discussion forum]
-
-## Table of Contents [if the explainer is longer than one printed page]
-
-<!-- Update this table of contents by running `npx doctoc README.md` -->
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-
-- [Introduction](#introduction)
-- [Goals](#goals)
-- [Non-goals](#non-goals)
-- [User research](#user-research)
-- [Use cases](#use-cases)
-  - [Use case 1](#use-case-1)
-  - [Use case 2](#use-case-2)
-- [[Potential Solution]](#potential-solution)
-  - [How this solution would solve the use cases](#how-this-solution-would-solve-the-use-cases)
-    - [Use case 1](#use-case-1-1)
-    - [Use case 2](#use-case-2-1)
-- [Detailed design discussion](#detailed-design-discussion)
-  - [[Tricky design choice #1]](#tricky-design-choice-1)
-  - [[Tricky design choice 2]](#tricky-design-choice-2)
-- [Considered alternatives](#considered-alternatives)
-  - [[Alternative 1]](#alternative-1)
-  - [[Alternative 2]](#alternative-2)
-- [Security and Privacy Considerations](#security-and-privacy-considerations)
-- [Stakeholder Feedback / Opposition](#stakeholder-feedback--opposition)
-- [References & acknowledgements](#references--acknowledgements)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+- https://github.com/explainers-by-googlers/webcodecs-manual-scalability/issues
+- https://github.com/w3c/webcodecs/issues/285
 
 ## Introduction
 
-[The "executive summary" or "abstract".
-Explain in a few sentences what the goals of the project are,
-and a brief overview of how the solution works.
-This should be no more than 1-2 paragraphs.]
+The WebCodecs API specifies a [scalabilityMode](https://www.w3.org/TR/webcodecs/#dom-videoencoderconfig-scalabilitymode) field in the [VideoEncoder](https://www.w3.org/TR/webcodecs/#video-encoder-config) object. This allows applications to enable support for a pre-defined set of basic scalability modes (e.g. *temporal layers*) as defined by the [SVC Extension](https://www.w3.org/TR/webrtc-svc/) for WebRTC.
+
+However, since the scalability modes are somewhat limited, and by their nature, they are fixed at configuration time, meaning they are not useful for features that need reactive real-time updates, such as long-term references.
+
+By evolving the WebCodecs VideoEncoder API with more advanced features, we make it possible to build more capable video conferencing and streaming applications that are better able to scale and adapt to varying network conditions.
 
 ## Goals
 
-[What is the **end-user need** which this project aims to address? Make this section short, and
-elaborate in the Use cases section.]
+The main goal is to allow a large amount of flexibility for applications, by allowing them to configure the reference structure dynamically per frame. This simple fact will solve most of our use cases in one fell swoop:
+* Support arbitrary temporal scaling factors
+* Support quality layers
+* Support per-layer rate control using external rate control
+* Support flexible and reactive reference structures for variable fps scenarios
+* Support LTR
+
+In addition, we want this feature to be exposed in a manner which is as codec and implementation agnostic as possible.
 
 ## Non-goals
 
-[If there are "adjacent" goals which may appear to be in scope but aren't,
-enumerate them here. This section may be fleshed out as your design progresses and you encounter necessary technical and other trade-offs.]
-
-## User research
-
-[If any user research has been conducted to inform your design choices,
-discuss the process and findings. User research should be more common than it is.]
+To constrain the problem to a reasonable scope, we propose that we at least initially not support:
+* Internal (CBR/VBR) Rate Control in combination with manual scalability mode
+  - Quantizer mode only, make both API surface and implementation easy
+* Reference frame scaling
+  - While spatial layers can technically be used, only 1:1 scaling factors.
+  - Planned as follow-up work.
+* Extensive capability querying
+  - E.g. differences in max number of reference buffers vs max number of references per frame.
+  - Planned as follow-up work.
 
 ## Use cases
 
-[Describe in detail what problems end-users are facing, which this project is trying to solve. A
-common mistake in this section is to take a web developer's or server operator's perspective, which
-makes reviewers worry that the proposal will violate [RFC 8890, The Internet is for End
-Users](https://www.rfc-editor.org/rfc/rfc8890).]
+The current scalability modes cover the basic temporal and spatial layering modes, but they still lack some functionality. Manual scalability unlocks new use cases:
 
-### Use case 1
-
-### Use case 2
-
-<!-- In your initial explainer, you shouldn't be attached or appear attached to any of the potential
-solutions you describe below this. -->
+* Arbitrary temporal scaling factors
+  - Not restricted to a 2:1 factor per layer index. Allows scaling to lower bitrates.
+* Quality layers
+  - SVC layers without a spatial scaling factor. Allows quality scaling without sacrificing FPS where resizing is not feasible.
+* Custom bitrate allocation
+  - Allows per-layer target bitrates that better match the current content as well as remote receive endpoint conditions.
+* Varying layer count dynamically based on content
+  - E.g. screensharing that may swing wildly from ~0 fps to 60fps depending on user actions and content currently on screen.
+* Long-term references
+  - Allows quick recovery and reduced frame dropping in lossy conditions
 
 ## [Potential Solution]
 
 [For each related element of the proposed solution - be it an additional JS method, a new object, a new element, a new concept etc., create a section which briefly describes it.]
 
 ```js
-// Provide example code - not IDL - demonstrating the design of the feature.
+// Example implementing L1T3 scalability using manual scalability mode.
 
-// If this API can be used on its own to address a user need,
-// link it back to one of the scenarios in the goals section.
+const pattern_index = frame_num % 4;
+const temporal_pattern = [0, 2, 1, 2];
+const temporal_index = temporal_pattern[pattern_index];
 
-// If you need to show how to get the feature set up
-// (initialized, or using permissions, etc.), include that too.
+let videoEncoder = new VideoEncoder(...);
+let config = {
+  codec: 'av01.0.04M.08',
+  width: 640,
+  height: 360,
+  bitrateMode: 'quantizer',
+  scalabilityMode: 'manual'  // New mode using per-frame references
+};
+
+const encoder_support = await VideoEncoder.isConfigSupported(config);
+if (encoder_support.supported) {
+  await videoEncoder.configure(config);
+  // Get all available reference buffers for this implementation.
+  const buffers = videoEncoder.getAllFrameBuffers();
+  if (buffers.length < 2) {
+    // Error handling...
+  }
+}
+
+// For each new `frame`:
+let encode_options = {
+  keyFrame: (frame_num == 0),
+  av1: { quantizer: getQp(temporal_index) },
+};
+
+switch (pattern_index++) {
+  case 0:
+    encode_options.referenceBuffers = [buffers[0]];  // Reference T0
+    encode_options.updateBuffer = buffers[0];        // Update T0
+    break;
+  case 1:
+    encode_options.referenceBuffers = [buffers[0]];  // Reference T0, no update
+    break;
+  case 2:
+    encode_options.referenceBuffers = [buffers[0]];  // Reference T0
+    encode_options.updateBuffer = buffers[1];        // Update T1
+    break;
+  case 3:
+    // Reference T1 and T0, no update.
+    encode_options.referenceBuffers = [buffers[1], buffers[0]]; 
+    break;
+}
+
+videoEncoder.encode(frame, encode_options);
+
 ```
 
-[Where necessary, provide links to longer explanations of the relevant pre-existing concepts and API.
-If there is no suitable external documentation, you might like to provide supplementary information as an appendix in this document, and provide an internal link where appropriate.]
-
-[If this is already specced, link to the relevant section of the spec.]
-
-[If spec work is in progress, link to the PR or draft of the spec.]
-
-[If you have more potential solutions in mind, add ## Potential Solution 2, 3, etc. sections.]
-
-### How this solution would solve the use cases
-
-[If there are a suite of interacting APIs, show how they work together to solve the use cases described.]
-
-#### Use case 1
-
-[Description of the end-user scenario]
-
-```js
-// Sample code demonstrating how to use these APIs to address that scenario.
-```
-
-#### Use case 2
-
-[etc.]
-
-## Detailed design discussion
-
-### [Tricky design choice #1]
-
-[Talk through the tradeoffs in coming to the specific design point you want to make.]
-
-```js
-// Illustrated with example code.
-```
-
-[This may be an open question,
-in which case you should link to any active discussion threads.]
-
-### [Tricky design choice 2]
-
-[etc.]
+See also discussion on [WebCodecs GitHub](https://github.com/w3c/webcodecs/issues/285#issuecomment-2125761556)
 
 ## Considered alternatives
 
-[This should include as many alternatives as you can,
-from high level architectural decisions down to alternative naming choices.]
-
-### [Alternative 1]
-
-[Describe an alternative which was considered,
-and why you decided against it.]
-
-### [Alternative 2]
-
-[etc.]
+The alternative to the above is to implement the desired use cases explicitly.
+This would likely entail a large extension to the already very long list of scalability modes.
+In addition, explicit LTR functionality would need to be exposed - with detailed life cycles for marking, acknowledging or retiring reference stages. This work would all be more implementation work and more spec work, for an end result that is still less flexible, not to mention harder to maintain and test.
 
 ## Security and Privacy Considerations
 
-[Describe any interesting answers you give to the [Security and Privacy Self-Review
-Questionnaire](https://www.w3.org/TR/security-privacy-questionnaire/) and any interesting ways that
-your feature interacts with [Chromium's Web Platform Security
-Guidelines](https://chromium.googlesource.com/chromium/src/+/master/docs/security/web-platform-security-guidelines.md).]
+Exposing support for the new manual mode and the number of reference buffers in `isConfigSupported()` does technically expose a small amount of fingerprinting data. However, this data is already exposed in other ways. E.g., which browser vendor and version for SW codecs, in combination with the GPU type used for HW codecs. The latter is available via e.g. WebGPU, WebGL or just from inspecting the output of the WebCodecs video encoder.
+
+For privacy and accessibility there is no difference.
+
+As for security, it might seem scary that we expose some new “low-level knobs”. However, the state space here is small enough that it can be exhaustively covered (codec * reference buffer selection * qp). The same is not true for the existing CBR modes, where references may do weird things at certain bitrates or during transient events like scene changes. Thus, we actually think this is less of a security risk than traditional CBR encoders.
 
 ## Stakeholder Feedback / Opposition
 
 [Implementors and other stakeholders may already have publicly stated positions on this work. If you can, list them here with links to evidence as appropriate.]
 
-- [Implementor A] : Positive
-- [Stakeholder B] : No signals
-- [Implementor C] : Negative
-
-[If appropriate, explain the reasons given by other implementors for their concerns.]
+- Chrome : Positive
+- Edge : No public signal
+- Firefox : No public signal
+- Safari : No public signal
 
 ## References & acknowledgements
 
-[Your design will change and be informed by many people; acknowledge them in an ongoing way! It helps build community and, as we only get by through the contributions of many, is only fair.]
-
-[Unless you have a specific reason not to, these should be in alphabetical order.]
+https://github.com/w3c/webcodecs/issues/285
 
 Many thanks for valuable feedback and advice from:
 
-- [Person 1]
-- [Person 2]
-- [etc.]
+- Eugene Zemtsov
+- Philip Eliasson
